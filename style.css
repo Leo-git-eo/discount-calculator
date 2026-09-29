@@ -346,6 +346,26 @@ html, body {
   font-size: 14px;
 }
 
+.memo-list {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.memo-list dt {
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.memo-list dt:first-child {
+  margin-top: 0;
+}
+
+.memo-list dd {
+  margin: 0 0 0 1em;
+  color: var(--text-fade);
+}
+
 /* オン/オフのトグルスイッチ */
 .switch {
   position: relative;
