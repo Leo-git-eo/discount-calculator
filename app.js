@@ -1,18 +1,8 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "discount-calc-settings-v1";
-  const KEYPAD_ORDER_KEY = "discount-calc-keypad-order";
+  const STORAGE_KEY = "discount-calc-settings-v2";
   const DIGIT_CAP = 3;
-
-  const CATEGORY_META = [
-    { id: "grocery", name: "グロッサリー" },
-    { id: "daily", name: "日配" },
-    { id: "bread", name: "パン" },
-  ];
-
-  // カテゴリごとの値引き段階数（パンのみ3段階、他は2段階）
-  const STAGE_COUNTS = { grocery: 2, daily: 2, bread: 3 };
 
   const ROUNDING_MODES = [
     { id: "floor", name: "切り捨て" },
@@ -27,12 +17,21 @@
     calc: ["7", "8", "9", "4", "5", "6", "1", "2", "3", "clear", "0", "back"],
   };
 
+  const DISPLAY_STYLES = [
+    { id: "tiles", name: "カード" },
+    { id: "circles", name: "丸" },
+  ];
+
   function defaultSettings() {
     return {
-      grocery: { rate1: 20, rate2: 50, roundMode: "floor", roundUnit: 1 },
-      daily: { rate1: 10, rate2: 30, roundMode: "floor", roundUnit: 1 },
-      // パン参考値: 翌日付2割引/菓子・惣菜・和洋菓子は当日3割引/食パンは当日半額
-      bread: { rate1: 20, rate2: 30, rate3: 50, roundMode: "floor", roundUnit: 1 },
+      rate1: 20,
+      rate2: 30,
+      rate3: 50,
+      roundMode: "floor",
+      roundUnit: 1,
+      keypadOrder: "phone",
+      displayStyle: "tiles",
+      showYenSign: false,
     };
   }
 
@@ -42,18 +41,13 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return fallback;
       const parsed = JSON.parse(raw);
-      const merged = {};
-      for (const cat of CATEGORY_META) {
-        merged[cat.id] = Object.assign({}, fallback[cat.id], parsed[cat.id] || {});
-      }
-      return merged;
+      return Object.assign({}, fallback, parsed);
     } catch (e) {
       return fallback;
     }
   }
 
   let settings = loadSettings();
-  let keypadOrder = localStorage.getItem(KEYPAD_ORDER_KEY) || "phone";
 
   function saveSettings() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -74,106 +68,188 @@
   }
 
   function formatYen(n) {
-    return "¥" + n.toLocaleString("ja-JP");
+    const sign = settings.showYenSign ? "¥" : "";
+    return sign + n.toLocaleString("ja-JP");
   }
 
   // ---------- Keypad order ----------
 
-  function applyKeypadOrder(mode) {
-    const order = KEYPAD_ORDERS[mode] || KEYPAD_ORDERS.phone;
-    document.querySelectorAll(".keypad").forEach((keypad) => {
-      order.forEach((key, idx) => {
-        const btn = keypad.querySelector(`[data-key="${key}"]`);
-        if (btn) btn.style.order = idx;
-      });
+  function applyKeypadOrder() {
+    const order = KEYPAD_ORDERS[settings.keypadOrder] || KEYPAD_ORDERS.phone;
+    const keypad = document.querySelector('[data-role="keypad"]');
+    order.forEach((key, idx) => {
+      const btn = keypad.querySelector(`[data-key="${key}"]`);
+      if (btn) btn.style.order = idx;
     });
   }
 
-  // ---------- Calculator screens ----------
+  // ---------- Calculator screen ----------
 
-  const screensContainer = document.getElementById("screens");
-  const calcTemplate = document.getElementById("calc-template");
-  const calcStates = {}; // categoryId -> { inputEl, pctNEl, valueNEl, currentInput }
+  const inputEl = document.querySelector('[data-role="input"]');
+  const keypad = document.querySelector('[data-role="keypad"]');
+  const tilesEl = document.querySelector('[data-role="tiles"]');
+  const circlesEl = document.querySelector('[data-role="circles"]');
 
-  function buildCalcScreen(cat) {
-    const stageCount = STAGE_COUNTS[cat.id] || 2;
-    const frag = calcTemplate.content.cloneNode(true);
-    const section = frag.querySelector(".calc-screen");
-    section.id = "screen-" + cat.id;
-    section.classList.add("screen");
-    section.hidden = true;
+  let currentInput = "0";
+  // 表示が"0"のまま何も入力していない状態か。true の間に押した数字（0でも）は
+  // そのまま1桁目として記録する（2桁の商品を「0」から打ち始められるようにするため）
+  let freshEntry = true;
 
-    const inputEl = frag.querySelector('[data-role="input"]');
-    const keypad = frag.querySelector('[data-role="keypad"]');
-    const resultsEl = frag.querySelector('[data-role="results"]');
-    resultsEl.dataset.stageCount = String(stageCount);
+  const tileRows = [1, 2, 3].map((i) => ({
+    pctEl: tilesEl.querySelector(`[data-role="pct${i}"]`),
+    valueEl: tilesEl.querySelector(`[data-role="value${i}"]`),
+  }));
 
-    const state = { inputEl, currentInput: "0", stageCount, rows: [] };
+  const circleRows = [1, 2, 3].map((i) => ({
+    itemEl: circlesEl.querySelector(`.circle-item[data-tier="${i}"]`),
+    pctEl: circlesEl.querySelector(`[data-role="cpct${i}"]`),
+    valueEl: circlesEl.querySelector(`[data-role="cvalue${i}"]`),
+  }));
 
-    for (let i = 1; i <= 3; i++) {
-      const pctEl = frag.querySelector(`[data-role="pct${i}"]`);
-      const valueEl = frag.querySelector(`[data-role="value${i}"]`);
-      if (i > stageCount) {
-        pctEl.closest(".result-tile").remove();
-        continue;
-      }
-      state.rows.push({ pctEl, valueEl });
+  function retainedPercents() {
+    return [100 - settings.rate1, 100 - settings.rate2, 100 - settings.rate3];
+  }
+
+  // カード形式：2段目・3段目の枠の高さを、割引後に残る割合（＝金額の比率）に合わせる
+  // 差が目で分かりやすいよう、比率をそのまま使わずしっかり強調する
+  function updateTileRowRatio() {
+    const retained = retainedPercents();
+    const EXPONENT = 2;
+    const w2 = Math.pow(retained[1], EXPONENT);
+    const w3 = Math.pow(retained[2], EXPONENT);
+    tilesEl.style.gridTemplateRows = `${w2}fr ${w3}fr`;
+  }
+
+  // 円形式：円の直径を、割引後に残る割合（＝金額の比率）に合わせて決める（入力金額では変化させない）
+  // 20%は左上、30%はその右側（やや下寄り）、50%は20%と30%の下・やや左寄りに
+  // 両方に軽く接するように配置する（手書きの配置案に合わせた）。
+  // 円同士は重ねない（重ねると金額の文字数によっては隠れてしまうため）。中心同士の距離を
+  // 「両方の半径の合計＋すき間」にすることで、サイズが変わっても必ず離れるようにする。
+  // 最後に、実際に使える枠（テンキーを押し出さない範囲）に収まるよう全体を縮小する
+  const CIRCLE_MIN_RATIO = 0.34; // 枠の幅に対する最小の円の直径
+  const CIRCLE_MAX_RATIO = 0.52; // 枠の幅に対する最大の円の直径
+  const CIRCLE_GAP = 6;
+
+  function updateCircleSizes() {
+    const containerW = circlesEl.clientWidth || Math.max(window.innerWidth - 32, 240);
+    const containerH = circlesEl.clientHeight || 300;
+
+    const retained = retainedPercents();
+    const minR = Math.min(...retained);
+    const maxR = Math.max(...retained);
+    const span = maxR - minR || 1;
+    const sizeMin = containerW * CIRCLE_MIN_RATIO;
+    const sizeMax = containerW * CIRCLE_MAX_RATIO;
+    const sizes = retained.map((r) => sizeMin + ((r - minR) / span) * (sizeMax - sizeMin));
+    const radii = sizes.map((s) => s / 2);
+
+    // 20%（円0）は左上、30%（円1）はその右（ほぼ真横、やや上寄り）
+    const c0 = { x: radii[0], y: radii[0] };
+    const dirX = 0.97, dirY = 0.12;
+    const dirLen = Math.hypot(dirX, dirY);
+    const dist01 = radii[0] + radii[1] + CIRCLE_GAP;
+    const c1 = {
+      x: c0.x + (dist01 * dirX) / dirLen,
+      y: c0.y + (dist01 * dirY) / dirLen,
+    };
+
+    // 50%（円2）は円0・円1の下、ちょうど中央。どちらとも重ならない最小の高さに置く
+    const midX = c0.x + (c1.x - c0.x) * 0.5;
+    const minDist02 = radii[0] + radii[2] + CIRCLE_GAP;
+    const minDist12 = radii[1] + radii[2] + CIRCLE_GAP;
+    const dx0 = midX - c0.x;
+    const dx1 = midX - c1.x;
+    const y0 = c0.y + Math.sqrt(Math.max(minDist02 * minDist02 - dx0 * dx0, 0));
+    const y1 = c1.y + Math.sqrt(Math.max(minDist12 * minDist12 - dx1 * dx1, 0));
+    const c2 = { x: midX, y: Math.max(y0, y1) };
+
+    const centers = [c0, c1, c2];
+
+    // 実際に使える幅・高さに収まらない場合は、円の大きさごと縮小する（重なりが起きないように保つ）
+    const right = Math.max(...centers.map((c, i) => c.x + radii[i]));
+    const bottom = Math.max(...centers.map((c, i) => c.y + radii[i]));
+    const scale = Math.min(containerW / right, containerH / bottom, 1);
+    if (scale < 1) {
+      centers.forEach((c) => { c.x *= scale; c.y *= scale; });
+      for (let i = 0; i < 3; i++) { sizes[i] *= scale; radii[i] *= scale; }
     }
 
-    keypad.addEventListener("click", (e) => {
-      const btn = e.target.closest(".key");
-      if (!btn) return;
-      const key = btn.dataset.key;
-      if (key === "clear") {
-        state.currentInput = "0";
-      } else if (key === "back") {
-        state.currentInput = state.currentInput.length > 1
-          ? state.currentInput.slice(0, -1)
-          : "0";
+    circleRows.forEach((row, i) => {
+      row.itemEl.style.width = sizes[i] + "px";
+      row.itemEl.style.height = sizes[i] + "px";
+      row.itemEl.style.left = (centers[i].x - radii[i]) + "px";
+      row.itemEl.style.top = (centers[i].y - radii[i]) + "px";
+      // 円が小さくなっても最低限読める大きさは保つ（50%引きの円が一番小さくなりやすいため）
+      row.valueEl.style.fontSize = Math.max(22, Math.round(sizes[i] * 0.21)) + "px";
+      row.pctEl.style.fontSize = Math.max(13, Math.round(sizes[i] * 0.11)) + "px";
+    });
+  }
+
+  function updateLayoutRatios() {
+    updateTileRowRatio();
+    if (!circlesEl.hidden) updateCircleSizes();
+  }
+
+  keypad.addEventListener("click", (e) => {
+    const btn = e.target.closest(".key");
+    if (!btn) return;
+    const key = btn.dataset.key;
+    if (key === "clear") {
+      currentInput = "0";
+      freshEntry = true;
+    } else if (key === "back") {
+      if (currentInput.length > 1) {
+        currentInput = currentInput.slice(0, -1);
       } else {
-        if (state.currentInput === "0") {
-          state.currentInput = key;
-        } else if (state.currentInput.length >= DIGIT_CAP) {
-          // 桁上限に達したら、新しい値の入力とみなしてリセットしてから入れ直す
-          state.currentInput = key;
-        } else {
-          state.currentInput += key;
-        }
+        currentInput = "0";
+        freshEntry = true;
       }
-      renderCalc(cat.id);
-    });
-
-    screensContainer.appendChild(frag);
-    calcStates[cat.id] = state;
-  }
-
-  function renderCalc(catId) {
-    const state = calcStates[catId];
-    const conf = settings[catId];
-    state.inputEl.textContent = Number(state.currentInput).toLocaleString("ja-JP");
-
-    const price = Number(state.currentInput) || 0;
-    state.rows.forEach((row, i) => {
-      if (price <= 0) {
-        row.valueEl.textContent = "-";
-        return;
+    } else {
+      if (freshEntry) {
+        // 最初の1桁目。「0」を押した場合もそのまま記録する（例: 0→4→5 で2桁の45円を3桁分の入力として扱える）
+        currentInput = key;
+        freshEntry = false;
+      } else if (currentInput.length >= DIGIT_CAP) {
+        // 桁上限に達したら、新しい値の入力とみなしてリセットしてから入れ直す
+        currentInput = key;
+      } else {
+        currentInput += key;
       }
-      const rate = conf["rate" + (i + 1)];
-      const v = computeDiscounted(price, rate, conf.roundMode, conf.roundUnit);
-      row.valueEl.textContent = formatYen(v);
-    });
-  }
-
-  function renderAllCalcLabels() {
-    for (const cat of CATEGORY_META) {
-      const conf = settings[cat.id];
-      const state = calcStates[cat.id];
-      if (!state) continue;
-      state.rows.forEach((row, i) => {
-        row.pctEl.textContent = `${conf["rate" + (i + 1)]}%`;
-      });
-      renderCalc(cat.id);
     }
+    renderCalc();
+  });
+
+  function renderCalc() {
+    // 入力した文字列をそのまま表示する（先頭の「0」も見えるようにするため。最大3桁なので桁区切りは不要）
+    inputEl.textContent = currentInput;
+    const price = Number(currentInput) || 0;
+
+    for (let i = 0; i < 3; i++) {
+      const rate = settings["rate" + (i + 1)];
+      const text = price > 0
+        ? formatYen(computeDiscounted(price, rate, settings.roundMode, settings.roundUnit))
+        : "-";
+      tileRows[i].valueEl.textContent = text;
+      circleRows[i].valueEl.textContent = text;
+    }
+  }
+
+  function renderLabels() {
+    for (let i = 0; i < 3; i++) {
+      const pct = settings["rate" + (i + 1)] + "%";
+      tileRows[i].pctEl.textContent = pct;
+      circleRows[i].pctEl.textContent = pct;
+    }
+    updateLayoutRatios();
+    renderCalc();
+  }
+
+  function applyDisplayStyle() {
+    const style = settings.displayStyle;
+    tilesEl.hidden = style !== "tiles";
+    circlesEl.hidden = style !== "circles";
+    // 表示直後はレイアウトが確定してから実寸を測る必要があるため、次のフレームで計算する
+    if (style === "circles") requestAnimationFrame(updateCircleSizes);
   }
 
   // ---------- Settings screen ----------
@@ -182,26 +258,175 @@
 
   function renderSettings() {
     settingsBody.innerHTML = "";
+    settingsBody.appendChild(buildRatesGroup());
+    settingsBody.appendChild(buildDisplayGroup());
     settingsBody.appendChild(buildKeypadOrderGroup());
+  }
 
-    for (const cat of CATEGORY_META) {
-      const conf = settings[cat.id];
-      const stageCount = STAGE_COUNTS[cat.id] || 2;
-      const group = document.createElement("div");
-      group.className = "settings-group";
+  function buildRatesGroup() {
+    const group = document.createElement("div");
+    group.className = "settings-group";
 
-      const heading = document.createElement("h2");
-      heading.textContent = cat.name;
-      group.appendChild(heading);
+    const heading = document.createElement("h2");
+    heading.textContent = "値引き率・端数処理";
+    group.appendChild(heading);
 
-      for (let i = 1; i <= stageCount; i++) {
-        group.appendChild(buildRateRow(cat.id, "rate" + i, `値引き率${i}`, conf["rate" + i]));
-      }
-      group.appendChild(buildRoundModeRow(cat.id, conf.roundMode));
-      group.appendChild(buildRoundUnitRow(cat.id, conf.roundUnit));
-
-      settingsBody.appendChild(group);
+    for (let i = 1; i <= 3; i++) {
+      group.appendChild(buildRateRow("rate" + i, `値引き率${i}`, settings["rate" + i]));
     }
+    group.appendChild(buildRoundModeRow());
+    group.appendChild(buildRoundUnitRow());
+
+    return group;
+  }
+
+  function buildRateRow(field, labelText, value) {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    row.appendChild(label);
+
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.alignItems = "center";
+    wrap.style.gap = "6px";
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "99";
+    input.value = value;
+    input.addEventListener("change", () => {
+      let n = Math.round(Number(input.value));
+      if (isNaN(n) || n < 0) n = 0;
+      if (n > 99) n = 99;
+      input.value = n;
+      settings[field] = n;
+      saveSettings();
+      renderLabels();
+    });
+    wrap.appendChild(input);
+
+    const unit = document.createElement("span");
+    unit.className = "unit";
+    unit.textContent = "%引き";
+    wrap.appendChild(unit);
+
+    row.appendChild(wrap);
+    return row;
+  }
+
+  function buildRoundModeRow() {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const label = document.createElement("label");
+    label.textContent = "端数処理";
+    row.appendChild(label);
+
+    const select = document.createElement("select");
+    for (const mode of ROUNDING_MODES) {
+      const opt = document.createElement("option");
+      opt.value = mode.id;
+      opt.textContent = mode.name;
+      if (mode.id === settings.roundMode) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener("change", () => {
+      settings.roundMode = select.value;
+      saveSettings();
+      renderCalc();
+    });
+    row.appendChild(select);
+    return row;
+  }
+
+  function buildRoundUnitRow() {
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const label = document.createElement("label");
+    label.textContent = "丸め単位";
+    row.appendChild(label);
+
+    const select = document.createElement("select");
+    for (const unit of ROUND_UNITS) {
+      const opt = document.createElement("option");
+      opt.value = unit;
+      opt.textContent = unit + "円単位";
+      if (unit === settings.roundUnit) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener("change", () => {
+      settings.roundUnit = Number(select.value);
+      saveSettings();
+      renderCalc();
+    });
+    row.appendChild(select);
+    return row;
+  }
+
+  function buildDisplayGroup() {
+    const group = document.createElement("div");
+    group.className = "settings-group";
+
+    const heading = document.createElement("h2");
+    heading.textContent = "表示スタイル";
+    group.appendChild(heading);
+
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const label = document.createElement("label");
+    label.textContent = "結果の見せ方";
+    row.appendChild(label);
+
+    const select = document.createElement("select");
+    for (const style of DISPLAY_STYLES) {
+      const opt = document.createElement("option");
+      opt.value = style.id;
+      opt.textContent = style.name;
+      if (style.id === settings.displayStyle) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener("change", () => {
+      settings.displayStyle = select.value;
+      saveSettings();
+      applyDisplayStyle();
+    });
+    row.appendChild(select);
+    group.appendChild(row);
+
+    const yenRow = document.createElement("div");
+    yenRow.className = "settings-row";
+
+    const yenLabel = document.createElement("label");
+    yenLabel.textContent = "¥マーク";
+    yenRow.appendChild(yenLabel);
+
+    const yenSelect = document.createElement("select");
+    const yenOptions = [
+      { id: "on", name: "¥ あり" },
+      { id: "off", name: "¥ なし" },
+    ];
+    for (const opt of yenOptions) {
+      const o = document.createElement("option");
+      o.value = opt.id;
+      o.textContent = opt.name;
+      if ((opt.id === "on") === settings.showYenSign) o.selected = true;
+      yenSelect.appendChild(o);
+    }
+    yenSelect.addEventListener("change", () => {
+      settings.showYenSign = yenSelect.value === "on";
+      saveSettings();
+      renderCalc();
+    });
+    yenRow.appendChild(yenSelect);
+    group.appendChild(yenRow);
+
+    return group;
   }
 
   function buildKeypadOrderGroup() {
@@ -228,13 +453,13 @@
       const o = document.createElement("option");
       o.value = opt.id;
       o.textContent = opt.name;
-      if (opt.id === keypadOrder) o.selected = true;
+      if (opt.id === settings.keypadOrder) o.selected = true;
       select.appendChild(o);
     }
     select.addEventListener("change", () => {
-      keypadOrder = select.value;
-      localStorage.setItem(KEYPAD_ORDER_KEY, keypadOrder);
-      applyKeypadOrder(keypadOrder);
+      settings.keypadOrder = select.value;
+      saveSettings();
+      applyKeypadOrder();
     });
     row.appendChild(select);
     group.appendChild(row);
@@ -242,131 +467,28 @@
     return group;
   }
 
-  function buildRateRow(catId, field, labelText, value) {
-    const row = document.createElement("div");
-    row.className = "settings-row";
+  // ---------- Screen navigation ----------
 
-    const label = document.createElement("label");
-    label.textContent = labelText;
-    row.appendChild(label);
+  const screenMain = document.getElementById("screen-main");
+  const screenSettings = document.getElementById("screen-settings");
+  const settingsBtn = document.getElementById("settings-btn");
+  const settingsBack = document.getElementById("settings-back");
 
-    const wrap = document.createElement("div");
-    wrap.style.display = "flex";
-    wrap.style.alignItems = "center";
-    wrap.style.gap = "6px";
-
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "0";
-    input.max = "99";
-    input.value = value;
-    input.addEventListener("change", () => {
-      let n = Math.round(Number(input.value));
-      if (isNaN(n) || n < 0) n = 0;
-      if (n > 99) n = 99;
-      input.value = n;
-      settings[catId][field] = n;
-      saveSettings();
-      renderAllCalcLabels();
-    });
-    wrap.appendChild(input);
-
-    const unit = document.createElement("span");
-    unit.className = "unit";
-    unit.textContent = "%引き";
-    wrap.appendChild(unit);
-
-    row.appendChild(wrap);
-    return row;
-  }
-
-  function buildRoundModeRow(catId, value) {
-    const row = document.createElement("div");
-    row.className = "settings-row";
-
-    const label = document.createElement("label");
-    label.textContent = "端数処理";
-    row.appendChild(label);
-
-    const select = document.createElement("select");
-    for (const mode of ROUNDING_MODES) {
-      const opt = document.createElement("option");
-      opt.value = mode.id;
-      opt.textContent = mode.name;
-      if (mode.id === value) opt.selected = true;
-      select.appendChild(opt);
-    }
-    select.addEventListener("change", () => {
-      settings[catId].roundMode = select.value;
-      saveSettings();
-      renderAllCalcLabels();
-    });
-    row.appendChild(select);
-    return row;
-  }
-
-  function buildRoundUnitRow(catId, value) {
-    const row = document.createElement("div");
-    row.className = "settings-row";
-
-    const label = document.createElement("label");
-    label.textContent = "丸め単位";
-    row.appendChild(label);
-
-    const select = document.createElement("select");
-    for (const unit of ROUND_UNITS) {
-      const opt = document.createElement("option");
-      opt.value = unit;
-      opt.textContent = unit + "円単位";
-      if (unit === value) opt.selected = true;
-      select.appendChild(opt);
-    }
-    select.addEventListener("change", () => {
-      settings[catId].roundUnit = Number(select.value);
-      saveSettings();
-      renderAllCalcLabels();
-    });
-    row.appendChild(select);
-    return row;
-  }
-
-  // ---------- Tab navigation ----------
-
-  const tabs = document.querySelectorAll(".tab");
-  const settingsScreen = document.getElementById("screen-settings");
-
-  function showTab(tabId) {
-    for (const cat of CATEGORY_META) {
-      const screen = document.getElementById("screen-" + cat.id);
-      if (screen) screen.hidden = cat.id !== tabId;
-    }
-    settingsScreen.hidden = tabId !== "settings";
-
-    for (const tab of tabs) {
-      tab.classList.toggle("active", tab.dataset.tab === tabId);
-    }
-
-    localStorage.setItem("discount-calc-last-tab", tabId);
-  }
-
-  for (const tab of tabs) {
-    tab.addEventListener("click", () => showTab(tab.dataset.tab));
-  }
+  settingsBtn.addEventListener("click", () => {
+    screenMain.hidden = true;
+    screenSettings.hidden = false;
+  });
+  settingsBack.addEventListener("click", () => {
+    screenSettings.hidden = true;
+    screenMain.hidden = false;
+  });
 
   // ---------- Init ----------
 
-  for (const cat of CATEGORY_META) {
-    buildCalcScreen(cat);
-  }
-  renderAllCalcLabels();
+  renderLabels();
+  applyDisplayStyle();
   renderSettings();
-  applyKeypadOrder(keypadOrder);
-
-  const lastTab = localStorage.getItem("discount-calc-last-tab");
-  const initialTab = CATEGORY_META.some((c) => c.id === lastTab) || lastTab === "settings"
-    ? lastTab
-    : "grocery";
-  showTab(initialTab);
+  applyKeypadOrder();
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
