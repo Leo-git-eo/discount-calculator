@@ -10,6 +10,8 @@
   --accent: #e8730f;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 
 * { box-sizing: border-box; }
@@ -34,42 +36,9 @@ html, body {
   padding-top: var(--safe-top);
 }
 
-/* スマホの横向きでは使わせず、縦向きに戻すよう案内する（パソコンの横長画面は対象外にするため高さで絞る） */
-.rotate-notice {
-  display: none;
-}
-
-@media (orientation: landscape) and (max-height: 500px) {
-  #app {
-    display: none;
-  }
-
-  .rotate-notice {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    background: var(--bg);
-    color: var(--text-dim);
-    font-size: 16px;
-    text-align: center;
-  }
-
-  .rotate-notice svg {
-    width: 40px;
-    height: 40px;
-  }
-
-  .rotate-notice p {
-    margin: 0;
-  }
-}
-
-/* ホーム画面から開いた時、iOSが画面上端にぼかしをかけるため、上の要素をその範囲より下にずらす */
-@media (display-mode: standalone) {
+/* ホーム画面から開いた時、iOSが画面上端にぼかしをかけるため、上の要素をその範囲より下にずらす
+   （横向きのiPhoneはステータスバーが消えるので縦向きだけ） */
+@media (display-mode: standalone) and (orientation: portrait) {
   #app {
     padding-top: calc(var(--safe-top) + 20px);
   }
@@ -420,4 +389,82 @@ html, body {
 
 .switch input:disabled + .switch-track {
   opacity: 0.4;
+}
+
+/* ---------- 横向き（スマホ） ----------
+   結果を片側、定価とテンキーを反対側に並べる。テンキーの左右は設定で切り替える。
+   パソコンの横長画面は対象外にするため、高さで絞る */
+@media (orientation: landscape) and (max-height: 500px) {
+  .calc-screen {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "results display"
+      "results keypad";
+    column-gap: 20px;
+    row-gap: 8px;
+    padding: 8px calc(16px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  }
+
+  .calc-screen[data-keypad-side="left"] {
+    grid-template-areas:
+      "display results"
+      "keypad results";
+  }
+
+  #settings-btn {
+    top: 2px;
+    right: calc(10px + var(--safe-right));
+  }
+
+  .calc-results,
+  .circles-wrap {
+    grid-area: results;
+    margin: 0;
+  }
+
+  /* 設定アイコンと重ならないよう、右側に来る方に少し余白をとる */
+  .calc-screen:not([data-keypad-side="left"]) .calc-display {
+    padding-right: 44px;
+  }
+
+  .calc-screen[data-keypad-side="left"] .calc-results,
+  .calc-screen[data-keypad-side="left"] .circles-wrap {
+    margin-top: 34px;
+  }
+
+  .calc-display {
+    grid-area: display;
+    padding-top: 0;
+    padding-bottom: 6px;
+  }
+
+  .calc-input {
+    font-size: 32px;
+  }
+
+  .keypad {
+    grid-area: keypad;
+    grid-template-rows: repeat(4, 1fr);
+    gap: 6px;
+    min-height: 0;
+  }
+
+  .key {
+    font-size: 22px;
+  }
+
+  .key-sub {
+    font-size: 18px;
+  }
+
+  .result-price {
+    font-size: 32px;
+  }
+
+  .settings-screen {
+    padding-left: calc(16px + var(--safe-left));
+    padding-right: calc(16px + var(--safe-right));
+  }
 }

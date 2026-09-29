@@ -42,6 +42,7 @@
       roundMode: "floor",
       roundUnit: 1,
       keypadOrder: "phone",
+      keypadSide: "right",
       displayStyle: "tiles",
       showYenSign: false,
       keepAwake: true,
@@ -129,6 +130,12 @@
       const btn = keypad.querySelector(`[data-key="${key}"]`);
       if (btn) btn.style.order = idx;
     });
+  }
+
+  // 横向きの時にテンキーを左右どちらに置くか（縦向きの見た目には影響しない）
+  function applyKeypadSide() {
+    document.getElementById("screen-main").dataset.keypadSide = settings.keypadSide;
+    if (!circlesEl.hidden) requestAnimationFrame(updateLayoutRatios);
   }
 
   // ---------- Calculator screen ----------
@@ -556,6 +563,33 @@
     row.appendChild(select);
     group.appendChild(row);
 
+    const sideRow = document.createElement("div");
+    sideRow.className = "settings-row";
+
+    const sideLabel = document.createElement("label");
+    sideLabel.textContent = "横向きの時の位置";
+    sideRow.appendChild(sideLabel);
+
+    const sideSelect = document.createElement("select");
+    const sideOptions = [
+      { id: "right", name: "右側" },
+      { id: "left", name: "左側" },
+    ];
+    for (const opt of sideOptions) {
+      const o = document.createElement("option");
+      o.value = opt.id;
+      o.textContent = opt.name;
+      if (opt.id === settings.keypadSide) o.selected = true;
+      sideSelect.appendChild(o);
+    }
+    sideSelect.addEventListener("change", () => {
+      settings.keypadSide = sideSelect.value;
+      saveSettings();
+      applyKeypadSide();
+    });
+    sideRow.appendChild(sideSelect);
+    group.appendChild(sideRow);
+
     return group;
   }
 
@@ -573,7 +607,12 @@
   settingsBack.addEventListener("click", () => {
     screenSettings.hidden = true;
     screenMain.hidden = false;
+    // 設定画面にいる間に向きが変わっていた場合に備え、表示してから円の大きさを測り直す
+    requestAnimationFrame(updateLayoutRatios);
   });
+
+  // 向きが変わると結果の表示エリアの形が変わるため、円の大きさ・位置を測り直す
+  window.addEventListener("resize", () => requestAnimationFrame(updateLayoutRatios));
 
   // ---------- Init ----------
 
@@ -581,6 +620,7 @@
   applyDisplayStyle();
   renderSettings();
   applyKeypadOrder();
+  applyKeypadSide();
   updateWakeLock();
 
   if ("serviceWorker" in navigator) {
