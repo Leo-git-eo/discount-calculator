@@ -1,6 +1,15 @@
 (() => {
   "use strict";
 
+  // ホーム画面追加時、CSSの100dvhが実際の画面高さとズレることがあるため、
+  // JSで取得した実寸を --app-height としてCSS側に渡す
+  function setAppHeight() {
+    document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
+  }
+  setAppHeight();
+  window.addEventListener("resize", setAppHeight);
+  window.addEventListener("orientationchange", setAppHeight);
+
   const STORAGE_KEY = "discount-calc-settings-v2";
   const DIGIT_CAP = 3;
 

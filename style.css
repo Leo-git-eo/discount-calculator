@@ -17,6 +17,7 @@
 html, body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
@@ -25,7 +26,9 @@ html, body {
 }
 
 #app {
-  height: 100dvh;
+  /* ホーム画面追加時、100dvh は実際の画面高さとズレることがあるため、
+     JSで取得した実寸（--app-height）を優先して使う */
+  height: var(--app-height, 100dvh);
   display: flex;
   flex-direction: column;
   padding-top: var(--safe-top);
