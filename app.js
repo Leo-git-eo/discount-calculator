@@ -5,10 +5,13 @@
   // JSで取得した実寸を --app-height としてCSS側に渡す
   function setAppHeight() {
     document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
+    // 横向きから縦向きに戻した時、iOSがページのスクロール位置を残して画面全体が上にずれるため、先頭に戻す
+    window.scrollTo(0, 0);
   }
   setAppHeight();
   window.addEventListener("resize", setAppHeight);
-  window.addEventListener("orientationchange", setAppHeight);
+  // orientationchange の時点ではまだ画面サイズが更新されていないことがあるため、少し待ってから測り直す
+  window.addEventListener("orientationchange", () => setTimeout(setAppHeight, 300));
 
   const STORAGE_KEY = "discount-calc-settings-v2";
   const DIGIT_CAP = 3;

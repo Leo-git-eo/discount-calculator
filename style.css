@@ -34,6 +34,40 @@ html, body {
   padding-top: var(--safe-top);
 }
 
+/* スマホの横向きでは使わせず、縦向きに戻すよう案内する（パソコンの横長画面は対象外にするため高さで絞る） */
+.rotate-notice {
+  display: none;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  #app {
+    display: none;
+  }
+
+  .rotate-notice {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: var(--bg);
+    color: var(--text-dim);
+    font-size: 16px;
+    text-align: center;
+  }
+
+  .rotate-notice svg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .rotate-notice p {
+    margin: 0;
+  }
+}
+
 /* ホーム画面から開いた時、iOSが画面上端にぼかしをかけるため、上の要素をその範囲より下にずらす */
 @media (display-mode: standalone) {
   #app {
