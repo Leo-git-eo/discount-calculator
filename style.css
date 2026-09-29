@@ -245,14 +245,20 @@ html, body {
 
 /* ---------- Settings screen ---------- */
 .settings-screen {
-  padding: 14px 16px calc(24px + var(--safe-bottom));
+  padding: 0 16px calc(24px + var(--safe-bottom));
 }
 
+/* スクロールしても「← 設定」を上に固定し、いつでも戻れるようにする */
 .settings-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 14px 0 8px;
   margin-bottom: 8px;
+  background: var(--bg);
 }
 
 #settings-back {
@@ -404,7 +410,8 @@ html, body {
       "results keypad";
     column-gap: 20px;
     row-gap: 8px;
-    padding: 8px calc(16px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(16px + var(--safe-left));
+    /* 上は設定アイコン用の帯。テンキーが左右どちらでも、両側の上端をアイコンより下でそろえる */
+    padding: 44px calc(16px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(16px + var(--safe-left));
   }
 
   .calc-screen[data-keypad-side="left"] {
@@ -414,7 +421,7 @@ html, body {
   }
 
   #settings-btn {
-    top: 2px;
+    top: 6px;
     right: calc(10px + var(--safe-right));
   }
 
@@ -422,16 +429,6 @@ html, body {
   .circles-wrap {
     grid-area: results;
     margin: 0;
-  }
-
-  /* 設定アイコンと重ならないよう、右側に来る方に少し余白をとる */
-  .calc-screen:not([data-keypad-side="left"]) .calc-display {
-    padding-right: 44px;
-  }
-
-  .calc-screen[data-keypad-side="left"] .calc-results,
-  .calc-screen[data-keypad-side="left"] .circles-wrap {
-    margin-top: 34px;
   }
 
   .calc-display {
