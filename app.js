@@ -41,6 +41,7 @@
       keypadOrder: "phone",
       displayStyle: "tiles",
       showYenSign: false,
+      keepAwake: true,
     };
   }
 
@@ -80,6 +81,41 @@
     const sign = settings.showYenSign ? "¥" : "";
     return sign + n.toLocaleString("ja-JP");
   }
+
+  // ---------- Keep screen awake ----------
+
+  const wakeLockSupported = "wakeLock" in navigator;
+  let wakeLock = null;
+  let wakeLockPending = false;
+
+  // 画面が表示されている間だけ保持する（アプリを閉じる・切り替えるとOS側で自動解除されるので、戻った時に取り直す）
+  async function updateWakeLock() {
+    if (!wakeLockSupported) return;
+    const want = settings.keepAwake && document.visibilityState === "visible";
+    if (want && !wakeLock && !wakeLockPending) {
+      wakeLockPending = true;
+      try {
+        const lock = await navigator.wakeLock.request("screen");
+        lock.addEventListener("release", () => {
+          if (wakeLock === lock) wakeLock = null;
+        });
+        wakeLock = lock;
+        if (!settings.keepAwake) updateWakeLock();
+      } catch (e) {
+        wakeLock = null;
+      } finally {
+        wakeLockPending = false;
+      }
+    } else if (!want && wakeLock) {
+      const lock = wakeLock;
+      wakeLock = null;
+      lock.release().catch(() => {});
+    }
+  }
+
+  document.addEventListener("visibilitychange", updateWakeLock);
+  // 端末によっては画面操作がないと取得できないため、タップした時にも取り直す
+  document.addEventListener("pointerdown", updateWakeLock);
 
   // ---------- Keypad order ----------
 
@@ -269,7 +305,51 @@
     settingsBody.innerHTML = "";
     settingsBody.appendChild(buildRatesGroup());
     settingsBody.appendChild(buildDisplayGroup());
+    settingsBody.appendChild(buildScreenGroup());
     settingsBody.appendChild(buildKeypadOrderGroup());
+  }
+
+  function buildScreenGroup() {
+    const group = document.createElement("div");
+    group.className = "settings-group";
+
+    const heading = document.createElement("h2");
+    heading.textContent = "画面";
+    group.appendChild(heading);
+
+    const row = document.createElement("div");
+    row.className = "settings-row";
+
+    const label = document.createElement("label");
+    label.htmlFor = "keep-awake";
+    label.textContent = wakeLockSupported
+      ? "使用中は画面を暗くしない"
+      : "使用中は画面を暗くしない（この端末は非対応）";
+    row.appendChild(label);
+
+    const sw = document.createElement("span");
+    sw.className = "switch";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = "keep-awake";
+    input.checked = settings.keepAwake;
+    input.disabled = !wakeLockSupported;
+    input.addEventListener("change", () => {
+      settings.keepAwake = input.checked;
+      saveSettings();
+      updateWakeLock();
+    });
+    sw.appendChild(input);
+
+    const track = document.createElement("span");
+    track.className = "switch-track";
+    sw.appendChild(track);
+
+    row.appendChild(sw);
+    group.appendChild(row);
+
+    return group;
   }
 
   function buildRatesGroup() {
@@ -498,6 +578,7 @@
   applyDisplayStyle();
   renderSettings();
   applyKeypadOrder();
+  updateWakeLock();
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
