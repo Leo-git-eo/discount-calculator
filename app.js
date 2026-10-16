@@ -614,8 +614,24 @@
   // 向きが変わると結果の表示エリアの形が変わるため、円の大きさ・位置を測り直す
   window.addEventListener("resize", () => requestAnimationFrame(updateLayoutRatios));
 
+  // ---------- Today's date ----------
+
+  const todayDate = document.getElementById("today-date");
+  const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+  function renderToday() {
+    const d = new Date();
+    todayDate.textContent = `${d.getMonth() + 1}月${d.getDate()}日(${WEEKDAYS[d.getDay()]})`;
+  }
+
+  // 日をまたいで開きっぱなしでも、アプリに戻ったときに更新する
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") renderToday();
+  });
+
   // ---------- Init ----------
 
+  renderToday();
   renderLabels();
   applyDisplayStyle();
   renderSettings();

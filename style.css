@@ -91,6 +91,22 @@ html, body {
   z-index: 2;
 }
 
+/* 今日の日付（設定ボタンと同じ高さの左端） */
+.today-date {
+  position: absolute;
+  top: -2px;
+  left: 16px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  z-index: 2;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
 /* 割引後の金額（カード形式・上部・大きく列で並べる） */
 .calc-results {
   flex: 1;
@@ -443,6 +459,11 @@ html, body {
   #settings-btn {
     top: 6px;
     right: calc(10px + var(--safe-right));
+  }
+
+  .today-date {
+    top: 6px;
+    left: calc(16px + env(safe-area-inset-left));
   }
 
   .calc-results,
